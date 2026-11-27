@@ -13,26 +13,37 @@ $userName = $_SESSION['user_name'];
 
 // Handle Add / Edit / Delete requests
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    if (!csrf_valid()) {
+        http_response_code(403);
+        die("Invalid form token. Please reload the page and try again.");
+    }
+
     $action = $_POST['action'] ?? 'save';
 
     if ($action == 'delete' && isset($_POST['entry_id'])) {
         $entryId = (int)$_POST['entry_id'];
         $stmt = $conn->prepare("DELETE FROM journal_entries WHERE id = ? AND user_id = ?");
         $stmt->bind_param("ii", $entryId, $userId);
-        $stmt->execute();
+        $ok = $stmt->execute();
         $stmt->close();
 
-        header("Location: final.php?status=deleted#tracker");
+        header("Location: final.php?status=" . ($ok ? 'deleted' : 'error') . "#tracker");
         exit();
     }
 
     if ($action == 'save') {
-        $entryId   = (int)$_POST['entry_id'];
-        $entryDate = $_POST['entry_date'];
-        $mood      = (int)$_POST['mood'];
-        $content   = trim($_POST['content']);
+        $entryId   = (int)($_POST['entry_id'] ?? 0);
+        $entryDate = $_POST['entry_date'] ?? '';
+        $mood      = (int)($_POST['mood'] ?? 3);
+        $content   = trim($_POST['content'] ?? '');
 
         if ($mood < 1 || $mood > 5) $mood = 3;
+
+        $parsedDate = DateTime::createFromFormat('!Y-m-d', $entryDate);
+        if (!$parsedDate || $parsedDate->format('Y-m-d') !== $entryDate) {
+            header("Location: final.php?status=error#tracker");
+            exit();
+        }
 
         if (!empty($content)) {
             if ($entryId > 0) {
@@ -44,10 +55,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $stmt = $conn->prepare("INSERT INTO journal_entries (user_id, entry_date, mood, content) VALUES (?, ?, ?, ?)");
                 $stmt->bind_param("isis", $userId, $entryDate, $mood, $content);
             }
-            $stmt->execute();
+            $ok = $stmt->execute();
             $stmt->close();
 
-            header("Location: final.php?status=saved#tracker");
+            header("Location: final.php?status=" . ($ok ? 'saved' : 'error') . "#tracker");
             exit();
         }
     }
@@ -213,8 +224,17 @@ $moodLabels = [
 <section id="tracker" class="py-5">
     <div class="container">
         <?php if (isset($_GET['status'])): ?>
-            <div class="alert alert-success alert-dismissible fade show">
-                <?= $_GET['status'] == 'deleted' ? 'Entry removed.' : 'Journal entry saved!' ?>
+            <div class="alert alert-<?= $_GET['status'] === 'error' ? 'danger' : 'success' ?> alert-dismissible fade show">
+                <?php
+                $status = $_GET['status'];
+                if ($status === 'deleted') {
+                    echo 'Entry removed.';
+                } elseif ($status === 'error') {
+                    echo 'Could not save the entry. Please check the date and try again.';
+                } else {
+                    echo 'Journal entry saved!';
+                }
+                ?>
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         <?php endif; ?>
@@ -241,6 +261,7 @@ $moodLabels = [
                 <div class="card p-4 h-100">
                     <h5 class="fw-bold mb-3" id="formHeading"><i class="fas fa-book gold-accent me-2"></i>2. Daily Journal</h5>
                     <form method="POST" action="final.php" id="journalForm">
+                        <?= csrf_field() ?>
                         <input type="hidden" name="action" value="save">
                         <input type="hidden" name="entry_id" id="entryId" value="0">
                         <input type="hidden" name="mood" id="moodField" value="4">
@@ -291,6 +312,7 @@ $moodLabels = [
                                     <i class="fas fa-edit me-1"></i>Edit
                                 </button>
                                 <form method="POST" action="final.php" onsubmit="return confirm('Delete this entry?');">
+                                    <?= csrf_field() ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="entry_id" value="<?= $row['id'] ?>">
                                     <button type="submit" class="btn btn-sm btn-outline-danger">

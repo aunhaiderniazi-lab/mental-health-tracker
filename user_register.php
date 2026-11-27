@@ -11,17 +11,21 @@ if (isset($_SESSION['user_id'])) {
 $msg = "";
 $msgType = "danger";
 
-if (isset($_POST['register'])) {
-    $name     = trim($_POST['name']);
-    $email    = trim($_POST['email']);
-    $password = $_POST['password'];
-    $address  = trim($_POST['address']);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!csrf_valid()) {
+        http_response_code(403);
+        $msg = "Invalid form token. Please reload the page and try again.";
+    } elseif (isset($_POST['register'])) {
+        $name     = trim($_POST['name'] ?? '');
+        $email    = trim($_POST['email'] ?? '');
+        $password = $_POST['password'] ?? '';
+        $address  = trim($_POST['address'] ?? '');
 
-    if (empty($name) || empty($email) || empty($password)) {
-        $msg = "Please fill in your name, email, and password.";
-    } elseif (strlen($password) < 6) {
-        $msg = "Password should be at least 6 characters long.";
-    } else {
+        if (empty($name) || empty($email) || empty($password)) {
+            $msg = "Please fill in your name, email, and password.";
+        } elseif (strlen($password) < 12) {
+            $msg = "Password should be at least 12 characters long.";
+        } else {
         // Check if email already exists
         $check = $conn->prepare("SELECT id FROM users WHERE email = ?");
         $check->bind_param("s", $email);
@@ -43,8 +47,9 @@ if (isset($_POST['register'])) {
                 $msg = "Something went wrong. Please try again.";
             }
             $stmt->close();
+            }
+            $check->close();
         }
-        $check->close();
     }
 }
 ?>
@@ -104,6 +109,7 @@ if (isset($_POST['register'])) {
     <?php endif; ?>
 
     <form method="POST" action="user_register.php">
+        <?= csrf_field() ?>
         <div class="mb-3">
             <label class="form-label">Full Name</label>
             <input type="text" name="name" class="form-control" required>
@@ -114,7 +120,7 @@ if (isset($_POST['register'])) {
         </div>
         <div class="mb-3">
             <label class="form-label">Password</label>
-            <input type="password" name="password" class="form-control" minlength="6" required>
+            <input type="password" name="password" class="form-control" minlength="12" required>
         </div>
         <div class="mb-4">
             <label class="form-label">City / Address</label>

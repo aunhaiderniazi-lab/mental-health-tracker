@@ -9,31 +9,50 @@ if (isset($_SESSION['user_id'])) {
 
 $error = "";
 
-if (isset($_POST['login'])) {
-    $email    = trim($_POST['email']);
-    $password = $_POST['password'];
+if (!isset($_SESSION['login_attempts'])) {
+    $_SESSION['login_attempts'] = 0;
+}
+if (!isset($_SESSION['login_lock_until'])) {
+    $_SESSION['login_lock_until'] = 0;
+}
 
-    if (empty($email) || empty($password)) {
-        $error = "Please enter both email and password.";
-    } else {
-        $stmt = $conn->prepare("SELECT id, user_name, password FROM users WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!csrf_valid()) {
+        http_response_code(403);
+        $error = "Invalid form token. Please reload the page and try again.";
+    } elseif (time() < $_SESSION['login_lock_until']) {
+        $error = "Too many login attempts. Try again in "
+            . ($_SESSION['login_lock_until'] - time()) . " seconds.";
+    } elseif (isset($_POST['login'])) {
+        $email    = trim($_POST['email'] ?? '');
+        $password = $_POST['password'] ?? '';
 
-        if ($row = $result->fetch_assoc()) {
-            if (password_verify($password, $row['password'])) {
-                $_SESSION['user_id']   = $row['id'];
-                $_SESSION['user_name'] = $row['user_name'];
-                header("Location: final.php");
-                exit();
-            } else {
-                $error = "Incorrect password.";
-            }
+        if (empty($email) || empty($password)) {
+            $error = "Please enter both email and password.";
         } else {
-            $error = "No account found with that email.";
+            $stmt = $conn->prepare("SELECT id, user_name, password FROM users WHERE email = ?");
+            $stmt->bind_param("s", $email);
+            $stmt->execute();
+            $result = $stmt->get_result();
+
+            if ($row = $result->fetch_assoc()) {
+                if (password_verify($password, $row['password'])) {
+                    session_regenerate_id(true);   // prevent session fixation
+                    $_SESSION['user_id']   = $row['id'];
+                    $_SESSION['user_name'] = $row['user_name'];
+                    unset($_SESSION['login_attempts'], $_SESSION['login_lock_until']);
+                    header("Location: final.php");
+                    exit();
+                }
+            }
+            $error = "Invalid email or password.";   // generic: no account enumeration
+            $_SESSION['login_attempts']++;
+            if ($_SESSION['login_attempts'] >= 5) {
+                $_SESSION['login_lock_until'] = time() + 300;
+                $_SESSION['login_attempts'] = 0;
+            }
+            $stmt->close();
         }
-        $stmt->close();
     }
 }
 ?>
@@ -88,6 +107,7 @@ if (isset($_POST['login'])) {
     <?php endif; ?>
 
     <form method="POST" action="index.php">
+        <?= csrf_field() ?>
         <div class="mb-3">
             <label class="form-label">Email Address</label>
             <input type="email" name="email" class="form-control" required>
